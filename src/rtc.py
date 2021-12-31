@@ -68,6 +68,8 @@ class RTConnection:
     """RTConnectionをするためのクラスです。
     `websockets`ライブラリで使われることを想定しています。"""
 
+    ws: WebSocketServerProtocol
+
     def __init__(
         self, name: str, *, cooldown: float = 0.001,
         loop: Optional[AbstractEventLoop] = None
