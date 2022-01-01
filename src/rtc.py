@@ -2,7 +2,7 @@
 
 from typing import (
     NewType, TypedDict, Coroutine, Callable, Literal, Union, Optional,
-    Any, Dict, List
+    Any, Dict
 )
 
 from asyncio import (
@@ -11,8 +11,10 @@ from asyncio import (
 from secrets import token_hex
 from time import time
 
-from websockets import ConnectionClosedOK, ConnectionClosedError
-from websockets.server import WebSocketServerProtocol
+from websockets import (
+    ConnectionClosed, ConnectionClosedError,
+    WebSocketServerProtocol, WebSocketClientProtocol
+)
 from ujson import dumps, loads
 
 from .utils import TimedDataEvent
@@ -20,8 +22,8 @@ from .utils import TimedDataEvent
 
 #   Type
 ResponseStatus = Union[Literal["Ok", "Error"], int, str]
-SessionNonce = NewType("SessionName", str, int)
-MainData = NewType("MainData")
+SessionNonce = NewType("SessionName", str)
+MainData = NewType("MainData", object)
 class Data(TypedDict, total=False):
     "通信時のデータのJSONの辞書の型です。"
     # Main
@@ -68,7 +70,7 @@ class RTConnection:
     """RTConnectionをするためのクラスです。
     `websockets`ライブラリで使われることを想定しています。"""
 
-    ws: WebSocketServerProtocol
+    ws: Union[WebSocketServerProtocol, WebSocketClientProtocol] = None
 
     def __init__(
         self, name: str, *, cooldown: float = 0.001,
@@ -167,20 +169,22 @@ class RTConnection:
         if before_key is not None:
             return self.queues[before_key]
 
-    async def communicate(self, ws: WebSocketServerProtocol):
+    async def communicate(
+        self, ws: Union[WebSocketServerProtocol, WebSocketClientProtocol]
+    ):
         "RTConnectionの通信を開始します。"
         if self.connected:
-            await ws.send(response("Error", None, "既に接続されています。"))
-            await ws.close()
+            await ws.close(reason="既に接続しています。")
         else:
             self.logger("info", "Start RTConnection")
             self.connected, self.ws = True, ws
             try:
-                await ws.send(response("Ok", None, "通信を開始します。"))
                 while True:
                     # 相手からのメッセージを待機する。
                     try:
-                        data: Data = loads(await wait_for(ws.recv(), timeout=self.COOLDOWN))
+                        data: Data = loads(
+                            await wait_for(ws.recv(), timeout=self.cooldown)
+                        )
                     except TimeoutError:
                         ...
                     else:
@@ -193,18 +197,24 @@ class RTConnection:
                     finally:
                         await sleep(self.cooldown)
                     # こっちからリクエストやレスポンスを送る。
-                    if (queue := self.get_queue()):
+                    if queue := self.get_queue():
+                        print(queue.subject)
                         await ws.send(dumps(queue.subject[1]))
                         if queue.subject[0] == "Response":
                             del self.queues[queue.subject[1]["session"]]
-            except (ConnectionClosedOK, ConnectionClosedError) as e:
+            except ConnectionClosed as e:
+                # 切断された際
                 if isinstance(e, ConnectionClosedError):
-                    self.logger("error", "[rtc] Disconnected by error:")
-                    raise e
+                    self.logger("error", f"Disconnected by error:")
+                    frame = e.sent or e.recv
+                    if frame is not None:
+                        self.logger("error", f"\tReason: {frame.reason}")
                 else:
-                    self.logger("info", "[rtc] Disconnected successfully.")
+                    self.logger("info", "Disconnected successfully.")
             except Exception as e:
-                self.connected = False
-                raise e
+                # 切断以外でエラーを発生させてしまった場合はこっちから切断する。
+                # ここは実行されるべきではない。
+                self.logger("error", f"{e.__class__.__name__}: {e}")
+                await ws.close(4444, reason=f"{e.__class__.__name__}: {e}")
             finally:
                 self.connected = False
