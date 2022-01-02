@@ -8,6 +8,7 @@ from typing import (
 from asyncio import (
     AbstractEventLoop, get_event_loop, wait_for, TimeoutError, sleep
 )
+from traceback import print_exc
 from secrets import token_hex
 from time import time
 
@@ -42,12 +43,12 @@ EventFunction = Callable[[MainData], EventCoroutine]
 
 
 #   Normal
-def response(status: ResponseStatus, data: MainData, message: str, **kwargs) -> str:
+def response(status: ResponseStatus, data: MainData, message: str, **kwargs) -> dict:
     "レスポンスのデータを作ります。"
     kwargs["status"] = status
     kwargs["data"] = data
     kwargs["message"] = message
-    return dumps(kwargs)
+    return kwargs
 
 
 def detect_nonce_name(nonce: SessionNonce) -> str:
@@ -71,9 +72,10 @@ class RTConnection:
     `websockets`ライブラリで使われることを想定しています。"""
 
     ws: Union[WebSocketServerProtocol, WebSocketClientProtocol] = None
+    TIMEOUT = 5
 
     def __init__(
-        self, name: str, *, cooldown: float = 0.001,
+        self, name: str, *, cooldown: float = 0.4,
         loop: Optional[AbstractEventLoop] = None
     ):
         self.queues: Dict[SessionNonce, TimedDataEvent] = {}
@@ -95,17 +97,23 @@ class RTConnection:
         self, event_name: str, data: MainData, message: str = "Fight"
     ) -> MainData:
         """リクエストをしてデータを取得します。"""
-        self.queues[create_session_nonce(self.name)] = (
+        session = create_session_nonce(self.name)
+        self.queues[session] = (
             event := TimedDataEvent(
                 subject=("request", response(
                     "Ok", data, message, event_name=event_name,
-                    session=create_session_nonce(self.name)
+                    session=session
                 ))
             )
         )
+        event.sended = False
         # レスポンス
-        data: Data = await event.wait()
-        del self.queues[data["session"]]
+        try:
+            data: Data = await wait_for(event.wait(), timeout=self.TIMEOUT)
+        except TimeoutError:
+            self.logger("warning", "Timeout waiting for event: %s" % event)
+            data: Data = response("Error", None, "Timeout", session=session)
+        del self.queues[session]
         if data["status"] == "Error":
             raise RequestError(data["message"])
         else:
@@ -116,6 +124,7 @@ class RTConnection:
         `request`のレスポンスが帰ってきた際に呼び出されます。
 
         Raises: KeyError"""
+        self.logger("info", "Received response: %s" % data)
         self.queues[data["session"]].set(data)
 
     def response(
@@ -137,6 +146,7 @@ class RTConnection:
         try:
             return self.response(data["session"], await coro)
         except Exception as e:
+            print_exc()
             return self.response(
                 data["session"], None, "Error", f"{e.__class__.__name__}: {e}"
             )
@@ -144,10 +154,11 @@ class RTConnection:
     def on_request(self, data: Data) -> None:
         """相手からリクエストがきた際に呼び出される関数です。
         `process_request`の呼び出しを`try`でラップしてエラーハンドリングをするコルーチン関数のコルーチンをイベントループにタスクとして追加します。"""
+        self.logger("info", "Received request: %s" % data)
         if data["event_name"] in self.events:
             self.loop.create_task(
                 self._wrap_error_handling(
-                    self.events[data["event_name"]](data["data"])
+                    self.events[data["event_name"]](data["data"]), data
                 )
             )
         else:
@@ -170,51 +181,39 @@ class RTConnection:
             return self.queues[before_key]
 
     async def communicate(
-        self, ws: Union[WebSocketServerProtocol, WebSocketClientProtocol]
+        self, ws: Union[WebSocketServerProtocol, WebSocketClientProtocol],
+        first: bool = False
     ):
         "RTConnectionの通信を開始します。"
         if self.connected:
-            await ws.close(reason="既に接続しています。")
-        else:
-            self.logger("info", "Start RTConnection")
-            self.connected, self.ws = True, ws
-            try:
-                while True:
-                    # 相手からのメッセージを待機する。
-                    try:
-                        data: Data = loads(
-                            await wait_for(ws.recv(), timeout=self.cooldown)
-                        )
-                    except TimeoutError:
-                        ...
-                    else:
-                        if detect_nonce_name(data["session"]) == self.NAME:
-                            # リクエストのレスポンスなら
-                            self.on_response(data)
-                        else:
-                            # 相手からのリクエストなら
-                            self.on_request(data)
-                    finally:
-                        await sleep(self.cooldown)
-                    # こっちからリクエストやレスポンスを送る。
+            return await ws.close(reason="既に接続されています。")
+        self.ws, self.queues = ws, {}
+        self.logger("info", "Start RTConnection")
+
+        try:
+            while True:
+                if first:
                     if queue := self.get_queue():
-                        print(queue.subject)
-                        await ws.send(dumps(queue.subject[1]))
-                        if queue.subject[0] == "Response":
+                        self.logger("info", "Send data: %s" % queue)
+                        if not getattr(queue, "sent", False):
+                            queue.sent = True
+                            await ws.send(dumps(queue.subject[1]))
+                        if queue.subject[0] == "response":
                             del self.queues[queue.subject[1]["session"]]
-            except ConnectionClosed as e:
-                # 切断された際
-                if isinstance(e, ConnectionClosedError):
-                    self.logger("error", f"Disconnected by error:")
-                    frame = e.sent or e.recv
-                    if frame is not None:
-                        self.logger("error", f"\tReason: {frame.reason}")
-                else:
-                    self.logger("info", "Disconnected successfully.")
-            except Exception as e:
-                # 切断以外でエラーを発生させてしまった場合はこっちから切断する。
-                # ここは実行されるべきではない。
-                self.logger("error", f"{e.__class__.__name__}: {e}")
-                await ws.close(4444, reason=f"{e.__class__.__name__}: {e}")
-            finally:
-                self.connected = False
+                    else:
+                        await ws.send("Nothing")
+                data = await ws.recv()
+                if data != "Nothing":
+                    data: Data = loads(data)
+                    if detect_nonce_name(data["session"]) == self.name:
+                        self.on_response(data)
+                    else:
+                        self.on_request(data)
+                await sleep(self.cooldown)
+                if not first:
+                    first = True
+        except ConnectionClosed:
+            self.logger("info", "Disconnected")
+        finally:
+            for queue in list(self.queues.values()):
+                queue.set(response("Error", None, "Disconnected"))
