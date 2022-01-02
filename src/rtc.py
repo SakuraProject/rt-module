@@ -75,7 +75,7 @@ class RTConnection:
     TIMEOUT = 5
 
     def __init__(
-        self, name: str, *, cooldown: float = 0.4,
+        self, name: str, *, cooldown: float = 0.01,
         loop: Optional[AbstractEventLoop] = None
     ):
         self.queues: Dict[SessionNonce, TimedDataEvent] = {}
