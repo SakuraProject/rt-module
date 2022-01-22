@@ -1,12 +1,13 @@
 # RT - RTConnection
 
+from __future__ import annotations
+
 from typing import (
-    NewType, TypedDict, Coroutine, Callable, Literal, Union, Optional,
-    Any, Dict
+    NewType, TypedDict, Coroutine, Callable, Literal, Union, Optional, Any
 )
 
 from asyncio import (
-    AbstractEventLoop, get_event_loop, wait_for, TimeoutError, sleep
+    AbstractEventLoop, get_event_loop, wait_for, TimeoutError, sleep, Event
 )
 from traceback import print_exc
 from secrets import token_hex
@@ -78,12 +79,16 @@ class RTConnection:
         self, name: str, *, cooldown: float = 0.01,
         loop: Optional[AbstractEventLoop] = None
     ):
-        self.queues: Dict[SessionNonce, TimedDataEvent] = {}
+        self.queues: dict[SessionNonce, TimedDataEvent] = {}
         self.name, self.cooldown = name, cooldown
         self.loop = loop or get_event_loop()
-        self.connected = False
+        self.ready = Event()
 
-        self.events: Dict[str, EventFunction] = {}
+        self.events: dict[str, EventFunction] = {}
+
+    @property
+    def connected(self) -> bool:
+        return self.ready.is_set()
 
     def set_event(self, function: EventFunction, name: Optional[str] = None) -> None:
         "イベントを登録します。"
@@ -113,7 +118,8 @@ class RTConnection:
         except TimeoutError:
             self.logger("warning", "Timeout waiting for event: %s" % event)
             data: Data = response("Error", None, "Timeout", session=session)
-        del self.queues[session]
+        if session in self.queues:
+            del self.queues[session]
         if data["status"] == "Error":
             raise RequestError(data["message"])
         else:
@@ -188,6 +194,7 @@ class RTConnection:
         if self.connected:
             return await ws.close(reason="既に接続されています。")
         self.ws, self.queues = ws, {}
+        self.ready.set()
         self.logger("info", "Start RTConnection")
 
         try:
@@ -217,3 +224,4 @@ class RTConnection:
         finally:
             for queue in list(self.queues.values()):
                 queue.set(response("Error", None, "Disconnected"))
+        self.ready.clear()

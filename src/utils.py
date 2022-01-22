@@ -25,7 +25,7 @@ class DataEvent(Event):
         return self.data
 
     def __str__(self) -> str:
-        return f"<DataEvent data={self.data} subject={self.subject} original={Event.__str__(self)}>"
+        return f"<DataEvent subject={self.subject} original={Event.__str__(self)}>"
 
 
 class TimedDataEvent(DataEvent):
