@@ -7,7 +7,8 @@ from typing import (
 )
 
 from asyncio import (
-    AbstractEventLoop, get_running_loop, wait_for, TimeoutError, sleep, Event
+    AbstractEventLoop, get_running_loop, wait_for, TimeoutError as AioTimeoutError,
+    sleep, Event
 )
 from traceback import print_exc
 from secrets import token_hex
@@ -118,7 +119,7 @@ class RTConnection:
         # レスポンス
         try:
             data: Data = await wait_for(event.wait(), timeout=self.TIMEOUT)
-        except TimeoutError:
+        except AioTimeoutError:
             self.logger(
                 "warning", "Timeout waiting for event: %s"
                 % self._make_session_name({"session": session, "event_name": event_name})
@@ -207,27 +208,34 @@ class RTConnection:
             while True:
                 if first:
                     if queue := self.get_queue():
-                        self.logger("info", "Send data: %s" % self._make_session_name(queue.subject[1]))
                         if not getattr(queue, "sent", False):
+                            self.logger("info", "Send data: %s" % self._make_session_name(queue.subject[1]))
                             queue.sent = True
                             await ws.send(dumps(queue.subject[1]))
                         if queue.subject[0] == "response":
                             del self.queues[queue.subject[1]["session"]]
                     else:
                         await ws.send("Nothing")
-                data = await ws.recv()
-                if data != "Nothing":
-                    data: Data = loads(data)
-                    if detect_nonce_name(data["session"]) == self.name:
-                        self.on_response(data)
-                    else:
-                        self.on_request(data)
+                try:
+                    data = await wait_for(ws.recv(), timeout=0.5)
+                except AioTimeoutError:
+                    await sleep(self.cooldown)
+                else:
+                    if data != "Nothing":
+                        data: Data = loads(data)
+                        if detect_nonce_name(data["session"]) == self.name:
+                            self.on_response(data)
+                        else:
+                            self.on_request(data)
                 await sleep(self.cooldown)
                 if not first:
                     first = True
-        except ConnectionClosed:
-            self.logger("info", "Disconnected")
+        except Exception as e:
+            if isinstance(e, ConnectionClosed):
+                self.logger("info", "Disconnected")
+            else:
+                self.logger("error", "Something went wrong: %s" % e)
+                await ws.close()
         finally:
             for queue in list(self.queues.values()):
                 queue.set(response("Error", None, "Disconnected"))
-        self.ready.clear()
