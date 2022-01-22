@@ -24,9 +24,6 @@ class DataEvent(Event):
         await super().wait()
         return self.data
 
-    def __str__(self) -> str:
-        return f"<DataEvent subject={self.subject} original={Event.__str__(self)}>"
-
 
 class TimedDataEvent(DataEvent):
     "`DataEvent`を時間を記録するように拡張したものです。"
@@ -34,8 +31,3 @@ class TimedDataEvent(DataEvent):
     def __init__(self, *args, **kwargs):
         self.created_at = time()
         super().__init__(*args, **kwargs)
-
-    def __str__(self) -> str:
-        return DataEvent.__str__(self).replace(
-            'DataEvent ', f'TimedDataEvent created_at={self.created_at} '
-        )

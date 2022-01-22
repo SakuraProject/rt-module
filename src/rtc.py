@@ -86,6 +86,9 @@ class RTConnection:
 
         self.events: dict[str, EventFunction] = {}
 
+    def _make_session_name(self, data: Data) -> str:
+        return f"{data['event_name']}_{data['session']}"
+
     @property
     def connected(self) -> bool:
         return self.ready.is_set()
@@ -116,7 +119,10 @@ class RTConnection:
         try:
             data: Data = await wait_for(event.wait(), timeout=self.TIMEOUT)
         except TimeoutError:
-            self.logger("warning", "Timeout waiting for event: %s" % event)
+            self.logger(
+                "warning", "Timeout waiting for event: %s"
+                % self._make_session_name({"session": session, "event_name": event_name})
+            )
             data: Data = response("Error", None, "Timeout", session=session)
         if session in self.queues:
             del self.queues[session]
@@ -130,7 +136,7 @@ class RTConnection:
         `request`のレスポンスが帰ってきた際に呼び出されます。
 
         Raises: KeyError"""
-        self.logger("info", "Received response: %s" % data["session"])
+        self.logger("info", "Received response: %s" % self._make_session_name(data))
         self.queues[data["session"]].set(data)
 
     def response(
@@ -160,7 +166,7 @@ class RTConnection:
     def on_request(self, data: Data) -> None:
         """相手からリクエストがきた際に呼び出される関数です。
         `process_request`の呼び出しを`try`でラップしてエラーハンドリングをするコルーチン関数のコルーチンをイベントループにタスクとして追加します。"""
-        self.logger("info", "Received request: %s" % data["session"])
+        self.logger("info", "Received request: %s" % self._make_session_name(data))
         if data["event_name"] in self.events:
             self.loop.create_task(
                 self._wrap_error_handling(
@@ -201,7 +207,7 @@ class RTConnection:
             while True:
                 if first:
                     if queue := self.get_queue():
-                        self.logger("info", "Send data: %s" % queue)
+                        self.logger("info", "Send data: %s" % self._make_session_name(queue.subject[1]))
                         if not getattr(queue, "sent", False):
                             queue.sent = True
                             await ws.send(dumps(queue.subject[1]))
