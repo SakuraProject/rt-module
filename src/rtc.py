@@ -130,7 +130,7 @@ class RTConnection:
         `request`のレスポンスが帰ってきた際に呼び出されます。
 
         Raises: KeyError"""
-        self.logger("info", "Received response: %s" % data)
+        self.logger("info", "Received response: %s" % data["session"])
         self.queues[data["session"]].set(data)
 
     def response(
@@ -160,7 +160,7 @@ class RTConnection:
     def on_request(self, data: Data) -> None:
         """相手からリクエストがきた際に呼び出される関数です。
         `process_request`の呼び出しを`try`でラップしてエラーハンドリングをするコルーチン関数のコルーチンをイベントループにタスクとして追加します。"""
-        self.logger("info", "Received request: %s" % data)
+        self.logger("info", "Received request: %s" % data["session"])
         if data["event_name"] in self.events:
             self.loop.create_task(
                 self._wrap_error_handling(
