@@ -7,16 +7,13 @@ from typing import (
 )
 
 from asyncio import (
-    AbstractEventLoop, get_event_loop, wait_for, TimeoutError, sleep, Event
+    AbstractEventLoop, get_running_loop, wait_for, TimeoutError, sleep, Event
 )
 from traceback import print_exc
 from secrets import token_hex
 from time import time
 
-from websockets import (
-    ConnectionClosed, ConnectionClosedError,
-    WebSocketServerProtocol, WebSocketClientProtocol
-)
+from websockets import ConnectionClosed, WebSocketServerProtocol, WebSocketClientProtocol
 from ujson import dumps, loads
 
 from .utils import TimedDataEvent
@@ -81,13 +78,16 @@ class RTConnection:
     ):
         self.queues: dict[SessionNonce, TimedDataEvent] = {}
         self.name, self.cooldown = name, cooldown
-        self.loop = loop or get_event_loop()
+        self.loop = loop
         self.ready = Event()
 
         self.events: dict[str, EventFunction] = {}
 
+    def set_loop(self, loop: Optional[AbstractEventLoop]) -> None:
+        self.loop = loop or get_running_loop()
+
     def _make_session_name(self, data: Data) -> str:
-        return f"{data['event_name']}_{data['session']}"
+        return f"{data.get('event_name', '...')} - {data['session']}"
 
     @property
     def connected(self) -> bool:
