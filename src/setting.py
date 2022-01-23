@@ -14,5 +14,4 @@ class Kwargs(TypedDict):
 class CommandData(TypedDict, total=False):
     headding: dict[str, str]
     category: dict[str, str]
-    help: dict[str, str]
     kwargs: dict[str, Kwargs]
