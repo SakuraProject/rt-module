@@ -85,6 +85,7 @@ class RTConnection:
         self.events: dict[str, EventFunction] = {}
 
     def set_loop(self, loop: Optional[AbstractEventLoop]) -> None:
+        "イベントループを設定します。これは接続以前に実行されるべきです。"
         self.loop = loop or get_running_loop()
 
     def _make_session_name(self, data: Data) -> str:
@@ -200,9 +201,13 @@ class RTConnection:
         "RTConnectionの通信を開始します。"
         if self.connected:
             return await ws.close(reason="既に接続されています。")
+        assert self.loop is not None, "イベントループを設定してください。"
         self.ws, self.queues = ws, {}
         self.ready.set()
         self.logger("info", "Start RTConnection")
+        # on_readyがあれば実行する。
+        if "on_connect" in self.events:
+            self.loop.create_task(self.events["on_connect"](self))
 
         try:
             while True:
