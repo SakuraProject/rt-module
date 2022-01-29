@@ -27,8 +27,13 @@ class Channel(Snowflake):
     type: Literal["text", "voice"]
 
 
+class Role(Snowflake):
+    ...
+
+
 class Guild(HasAvatar):
     members: List[Member]
     text_channels: List[Channel]
     voice_channels: List[Channel]
     channels: List[Channel]
+    roles: List[Role]
