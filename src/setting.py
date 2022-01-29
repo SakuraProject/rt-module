@@ -20,5 +20,6 @@ class CommandData(TypedDict, total=False):
 class CommandRunData(TypedDict, total=False):
     name: str
     kwargs: list[str]
-    channel: int
-    guild: int
+    channel_id: int
+    guild_id: int
+    user_id: int
