@@ -96,15 +96,8 @@ class RTConnection:
     def connected(self) -> bool:
         return self.ready.is_set()
 
-    def set_event(
-        self, function: EventFunction, name: Optional[str] = None,
-        wait: float = 0.0
-    ) -> None:
+    def set_event(self, function: EventFunction, name: Optional[str] = None) -> None:
         "イベントを登録します。"
-        try:
-            function.__rtc_wait__ = wait
-        except AttributeError:
-            function.__func__.__rtc_wait__ = wait
         self.events[name or function.__name__] = function
 
     def remove_event(self, name: str) -> None:
@@ -164,11 +157,7 @@ class RTConnection:
         この関数はリクエストのイベントに対応した関数を実行してその関数の返り値を`response`に渡すように実装しましょう。"""
         raise NotImplementedError()
 
-    async def _wrap_error_handling(
-        self, coro: EventCoroutine, data: Data, original_function: EventFunction
-    ) -> None:
-        if getattr(original_function, "__rtc_wait__", None):
-            await sleep(original_function.__rtc_wait__)
+    async def _wrap_error_handling(self, coro: EventCoroutine, data: Data) -> None:
         try:
             return self.response(data["session"], await coro)
         except Exception as e:
@@ -184,8 +173,7 @@ class RTConnection:
         if data["event_name"] in self.events:
             self.loop.create_task(
                 self._wrap_error_handling(
-                    self.events[data["event_name"]](data["data"]), data,
-                    self.events[data["event_name"]]
+                    self.events[data["event_name"]](data["data"]), data
                 )
             )
         else:
@@ -225,14 +213,16 @@ class RTConnection:
         try:
             while True:
                 if first:
+                    sent = False
                     if queue := self.get_queue():
                         if not getattr(queue, "sent", False):
                             self.logger("info", "Send data: %s" % self._make_session_name(queue.subject[1]))
                             queue.sent = True
                             await ws.send(dumps(queue.subject[1]))
+                            sent = True
                         if queue.subject[0] == "response":
                             del self.queues[queue.subject[1]["session"]]
-                    else:
+                    if not sent:
                         await ws.send("Nothing")
                 await sleep(self.cooldown)
                 data = await ws.recv()
