@@ -234,17 +234,14 @@ class RTConnection:
                             del self.queues[queue.subject[1]["session"]]
                     else:
                         await ws.send("Nothing")
-                try:
-                    data = await wait_for(ws.recv(), timeout=0.5)
-                except AioTimeoutError:
-                    await sleep(self.cooldown)
-                else:
-                    if data != "Nothing":
-                        data: Data = loads(data)
-                        if detect_nonce_name(data["session"]) == self.name:
-                            self.on_response(data)
-                        else:
-                            self.on_request(data)
+                await sleep(self.cooldown)
+                data = await ws.recv()
+                if data != "Nothing":
+                    data: Data = loads(data)
+                    if detect_nonce_name(data["session"]) == self.name:
+                        self.on_response(data)
+                    else:
+                        self.on_request(data)
                 await sleep(self.cooldown)
                 if not first:
                     first = True
