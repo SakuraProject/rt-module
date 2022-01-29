@@ -15,3 +15,10 @@ class CommandData(TypedDict, total=False):
     headding: dict[str, str]
     category: dict[str, str]
     kwargs: dict[str, Kwargs]
+
+
+class CommandRunData(TypedDict, total=False):
+    name: str
+    kwargs: list[str]
+    channel: int
+    guild: int
