@@ -13,6 +13,7 @@ from asyncio import (
 from traceback import print_exc
 from secrets import token_hex
 from time import time
+from attr import Attribute
 
 from websockets import ConnectionClosed, WebSocketServerProtocol, WebSocketClientProtocol
 from ujson import dumps, loads
@@ -95,8 +96,15 @@ class RTConnection:
     def connected(self) -> bool:
         return self.ready.is_set()
 
-    def set_event(self, function: EventFunction, name: Optional[str] = None) -> None:
+    def set_event(
+        self, function: EventFunction, name: Optional[str] = None,
+        wait: float = 0.0
+    ) -> None:
         "イベントを登録します。"
+        try:
+            function.__rtc_wait__ = wait
+        except AttributeError:
+            function.__func__.__rtc_wait__ = wait
         self.events[name or function.__name__] = function
 
     def remove_event(self, name: str) -> None:
@@ -156,7 +164,11 @@ class RTConnection:
         この関数はリクエストのイベントに対応した関数を実行してその関数の返り値を`response`に渡すように実装しましょう。"""
         raise NotImplementedError()
 
-    async def _wrap_error_handling(self, coro: EventCoroutine, data: Data) -> None:
+    async def _wrap_error_handling(
+        self, coro: EventCoroutine, data: Data, original_function: EventFunction
+    ) -> None:
+        if getattr(original_function, "__rtc_wait__", None):
+            await sleep(original_function.__rtc_wait__)
         try:
             return self.response(data["session"], await coro)
         except Exception as e:
@@ -172,7 +184,8 @@ class RTConnection:
         if data["event_name"] in self.events:
             self.loop.create_task(
                 self._wrap_error_handling(
-                    self.events[data["event_name"]](data["data"]), data
+                    self.events[data["event_name"]](data["data"]), data,
+                    self.events[data["event_name"]]
                 )
             )
         else:
