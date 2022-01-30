@@ -241,6 +241,7 @@ class RTConnection:
                 self.logger("error", "Something went wrong")
                 await ws.close()
             print_exc()
+            self.last_exception = e
         finally:
             for queue in list(self.queues.values()):
                 queue.set(response("Error", None, "Disconnected"))
