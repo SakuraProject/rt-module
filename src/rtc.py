@@ -10,6 +10,7 @@ from asyncio import (
     AbstractEventLoop, get_running_loop, wait_for, TimeoutError as AioTimeoutError,
     sleep, Event
 )
+from inspect import iscoroutinefunction
 from traceback import print_exc
 from secrets import token_hex
 from time import time
@@ -38,7 +39,7 @@ class Data(TypedDict, total=False):
 
 
 EventCoroutine = Coroutine[Any, Any, MainData]
-EventFunction = Callable[[MainData], EventCoroutine]
+EventFunction = Union[Callable[[MainData], EventCoroutine], Callable[[MainData], MainData]]
 
 
 #   Normal
@@ -97,6 +98,10 @@ class RTConnection:
 
     def set_event(self, function: EventFunction, name: Optional[str] = None) -> None:
         "イベントを登録します。"
+        try:
+            function.__is_coro__ = iscoroutinefunction(function)
+        except AttributeError:
+            function.__func__.__is_coro__ = iscoroutinefunction(function.__func__)
         self.events[name or function.__name__] = function
 
     def remove_event(self, name: str) -> None:
@@ -156,9 +161,12 @@ class RTConnection:
         この関数はリクエストのイベントに対応した関数を実行してその関数の返り値を`response`に渡すように実装しましょう。"""
         raise NotImplementedError()
 
-    async def _wrap_error_handling(self, coro: EventCoroutine, data: Data) -> None:
+    async def _wrap_error_handling(self, func: EventFunction, data: Data) -> None:
         try:
-            return self.response(data["session"], await coro)
+            if func.__is_coro__:
+                return self.response(data["session"], await func(data["data"]))
+            else:
+                return self.response(data["session"], func(data["data"]))
         except Exception as e:
             print_exc()
             return self.response(
@@ -171,14 +179,11 @@ class RTConnection:
         self.logger("info", "Received request: %s" % self._make_session_name(data))
         if data["event_name"] in self.events:
             self.loop.create_task(
-                self._wrap_error_handling(
-                    self.events[data["event_name"]](data["data"]), data
-                )
+                self._wrap_error_handling(self.events[data["event_name"]], data)
             )
         else:
-            self.response(
-                data["session"], None, "Error",
-                f"EventNotFound: {data['event_name']}"
+            return self.response(
+                data["session"], None, "Error", f"EventNotFound: {data['event_name']}"
             )
 
     def logger(self, mode: str, *args, **kwargs) -> Any:
