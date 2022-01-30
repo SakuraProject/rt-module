@@ -13,7 +13,6 @@ from asyncio import (
 from traceback import print_exc
 from secrets import token_hex
 from time import time
-from attr import Attribute
 
 from websockets import ConnectionClosed, WebSocketServerProtocol, WebSocketClientProtocol
 from ujson import dumps, loads
@@ -239,8 +238,9 @@ class RTConnection:
             if isinstance(e, ConnectionClosed):
                 self.logger("info", "Disconnected")
             else:
-                self.logger("error", "Something went wrong: %s" % e)
+                self.logger("error", "Something went wrong")
                 await ws.close()
+            print_exc()
         finally:
             for queue in list(self.queues.values()):
                 queue.set(response("Error", None, "Disconnected"))
