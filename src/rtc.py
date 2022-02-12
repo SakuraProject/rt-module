@@ -201,7 +201,7 @@ class RTConnection:
 
     async def communicate(
         self, ws: Union[WebSocketServerProtocol, WebSocketClientProtocol],
-        first: bool = False
+        first: bool = False, ping: bool = False
     ):
         "RTConnectionの通信を開始します。"
         if self.connected:
@@ -213,9 +213,19 @@ class RTConnection:
         # on_readyがあれば実行する。
         if "on_connect" in self.events:
             self.loop.create_task(self.events["on_connect"](self))
+        if ping:
+            before = time()
 
         try:
             while True:
+                # pingまたはpongを送る。
+                if ping and time() - before >= 30:
+                    future = await ws.ping("Ping")
+                    self.logger("info", "Pinging...")
+                    before = time()
+                    await wait_for(future, timeout=5)
+                    self.logger("info", "<< Pong! <<")
+                    continue
                 if first:
                     sent = False
                     if queue := self.get_queue():
@@ -230,7 +240,10 @@ class RTConnection:
                         await ws.send("Nothing")
                 await sleep(self.cooldown)
                 data = await ws.recv()
-                if data != "Nothing":
+                if data == "Ping":
+                    self.logger("info", "Ponging...")
+                    await ws.pong("Pong")
+                elif data != "Nothing":
                     data: Data = loads(data)
                     if detect_nonce_name(data["session"]) == self.name:
                         self.on_response(data)
@@ -242,6 +255,9 @@ class RTConnection:
         except Exception as e:
             if isinstance(e, ConnectionClosed):
                 self.logger("info", "Disconnected")
+            elif isinstance(e, AioTimeoutError):
+                self.logger("warn", "Disconnected by timeout")
+                await ws.close()
             else:
                 self.logger("error", "Something went wrong")
                 await ws.close()
