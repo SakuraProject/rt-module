@@ -201,7 +201,7 @@ class RTConnection:
 
     async def communicate(
         self, ws: Union[WebSocketServerProtocol, WebSocketClientProtocol],
-        first: bool = False, ping: bool = False
+        first: bool = False, ping: bool = True
     ):
         "RTConnectionの通信を開始します。"
         if self.connected:
