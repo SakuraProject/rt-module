@@ -131,6 +131,7 @@ class RTConnection:
                 % self._make_session_name({"session": session, "event_name": event_name})
             )
             data: Data = response("Error", None, "Timeout", session=session)
+            await self.ws.close()
         if session in self.queues:
             del self.queues[session]
         if data["status"] == "Error":
