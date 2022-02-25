@@ -15,6 +15,8 @@ from traceback import print_exc
 from secrets import token_hex
 from time import time
 
+from discord.ext import tasks
+
 from websockets import ConnectionClosed, WebSocketServerProtocol, WebSocketClientProtocol
 from ujson import dumps, loads
 
@@ -84,6 +86,9 @@ class RTConnection:
         self.ready = Event()
 
         self.events: dict[str, EventFunction] = {}
+
+        self.keep_alive.start()
+        self.set_event(self._keep_alive)
 
     def set_loop(self, loop: Optional[AbstractEventLoop]) -> None:
         "イベントループを設定します。これは接続以前に実行されるべきです。"
@@ -199,6 +204,22 @@ class RTConnection:
         if before_key is not None:
             return self.queues[before_key]
 
+    def _keep_alive(self, _):
+        ...
+
+    @tasks.loop(seconds=5)
+    async def keep_alive(self):
+        try: await self.request("_keep_alive", None)
+        except RequestError: ...
+
+    def __del__(self):
+        if self.keep_alive.is_running():
+            self.keep_alive.stop()
+
+    async def close(self, *args, **kwargs):
+        self.__del__()
+        return await self.ws.close(*args, **kwargs)
+
     async def communicate(
         self, ws: Union[WebSocketServerProtocol, WebSocketClientProtocol],
         first: bool = False, ping: bool = True
@@ -207,6 +228,7 @@ class RTConnection:
         if self.connected:
             return await ws.close(reason="既に接続されています。")
         assert self.loop is not None, "イベントループを設定してください。"
+        if not self.keep_alive.is_running(): self.keep_alive.start()
         self.ws, self.queues = ws, {}
         self.ready.set()
         self.logger("info", "Start RTConnection")
@@ -219,7 +241,7 @@ class RTConnection:
         try:
             while True:
                 # pingまたはpongを送る。
-                if ping and time() - before >= 30:
+                if ping and time() - before >= 180:
                     future = await ws.ping("Ping")
                     self.logger("info", "Pinging...")
                     before = time()
