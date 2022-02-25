@@ -182,7 +182,8 @@ class RTConnection:
     def on_request(self, data: Data) -> None:
         """相手からリクエストがきた際に呼び出される関数です。
         `process_request`の呼び出しを`try`でラップしてエラーハンドリングをするコルーチン関数のコルーチンをイベントループにタスクとして追加します。"""
-        self.logger("info", "Received request: %s" % self._make_session_name(data))
+        if data.get("data", "") != "_keep_alive":
+            self.logger("info", "Received request: %s" % self._make_session_name(data))
         if data["event_name"] in self.events:
             self.loop.create_task(
                 self._wrap_error_handling(self.events[data["event_name"]], data)
@@ -206,7 +207,7 @@ class RTConnection:
             return self.queues[before_key]
 
     def _keep_alive(self, _):
-        ...
+        return "_keep_alive"
 
     @tasks.loop(seconds=5)
     async def keep_alive(self):
@@ -229,9 +230,9 @@ class RTConnection:
         if self.connected:
             return await ws.close(reason="既に接続されています。")
         assert self.loop is not None, "イベントループを設定してください。"
-        if not self.keep_alive.is_running(): self.keep_alive.start()
         self.ws, self.queues = ws, {}
         self.ready.set()
+        if not self.keep_alive.is_running(): self.keep_alive.start()
         self.logger("info", "Start RTConnection")
         # on_readyがあれば実行する。
         if "on_connect" in self.events:
@@ -253,7 +254,8 @@ class RTConnection:
                     sent = False
                     if queue := self.get_queue():
                         if not getattr(queue, "sent", False):
-                            self.logger("info", "Send data: %s" % self._make_session_name(queue.subject[1]))
+                            if queue.subject[1].get("event_name", "") != "_keep_alive":
+                                self.logger("info", "Send data: %s" % self._make_session_name(queue.subject[1]))
                             queue.sent = True
                             await ws.send(dumps(queue.subject[1]))
                             sent = True
