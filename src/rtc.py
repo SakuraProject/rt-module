@@ -149,7 +149,8 @@ class RTConnection:
         `request`のレスポンスが帰ってきた際に呼び出されます。
 
         Raises: KeyError"""
-        self.logger("info", "Received response: %s" % self._make_session_name(data))
+        if data.get("data", "") != "_keep_alive":
+            self.logger("info", "Received response: %s" % self._make_session_name(data))
         self.queues[data["session"]].set(data)
 
     def response(
