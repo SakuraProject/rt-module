@@ -183,7 +183,7 @@ class RTConnection:
     def on_request(self, data: Data) -> None:
         """相手からリクエストがきた際に呼び出される関数です。
         `process_request`の呼び出しを`try`でラップしてエラーハンドリングをするコルーチン関数のコルーチンをイベントループにタスクとして追加します。"""
-        if data.get("data", "") != "_keep_alive":
+        if data["event_name"] != "_keep_alive":
             self.logger("info", "Received request: %s" % self._make_session_name(data))
         if data["event_name"] in self.events:
             self.loop.create_task(
@@ -255,7 +255,8 @@ class RTConnection:
                     sent = False
                     if queue := self.get_queue():
                         if not getattr(queue, "sent", False):
-                            if queue.subject[1].get("event_name", "") != "_keep_alive":
+                            if queue.subject[1].get("event_name", "") != "_keep_alive" \
+                                    and queue.subject[1].get("data", "") != "_keep_alive":
                                 self.logger("info", "Send data: %s" % self._make_session_name(queue.subject[1]))
                             queue.sent = True
                             await ws.send(dumps(queue.subject[1]))
