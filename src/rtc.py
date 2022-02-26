@@ -203,7 +203,8 @@ class RTConnection:
             return self.queues[before_key]
 
     async def close(self, *args, **kwargs):
-        return await self.ws.close(*args, **kwargs)
+        if self.ws is not None:
+            return await self.ws.close(*args, **kwargs)
 
     async def communicate(
         self, ws: Union[WebSocketServerProtocol, WebSocketClientProtocol],
