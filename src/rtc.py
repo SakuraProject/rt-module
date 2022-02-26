@@ -136,7 +136,7 @@ class RTConnection:
                 % self._make_session_name({"session": session, "event_name": event_name})
             )
             data: Data = response("Error", None, "Timeout", session=session)
-            await self.ws.close()
+            await self.close()
         if session in self.queues:
             del self.queues[session]
         if data["status"] == "Error":
@@ -223,17 +223,21 @@ class RTConnection:
         self.__del__()
         return await self.ws.close(*args, **kwargs)
 
+    async def delay_ka_start(self):
+        await sleep(5)
+        if not self.keep_alive.is_running(): self.keep_alive.start()
+
     async def communicate(
         self, ws: Union[WebSocketServerProtocol, WebSocketClientProtocol],
         first: bool = False, ping: bool = True
     ):
         "RTConnectionの通信を開始します。"
         if self.connected:
-            return await ws.close(reason="既に接続されています。")
+            return await self.close(reason="既に接続されています。")
         assert self.loop is not None, "イベントループを設定してください。"
         self.ws, self.queues = ws, {}
         self.ready.set()
-        if not self.keep_alive.is_running(): self.keep_alive.start()
+        self.loop.create_task(self.delay_ka_start())
         self.logger("info", "Start RTConnection")
         # on_readyがあれば実行する。
         if "on_connect" in self.events:
@@ -284,10 +288,10 @@ class RTConnection:
                 self.logger("info", "Disconnected")
             elif isinstance(e, AioTimeoutError):
                 self.logger("warn", "Disconnected by timeout")
-                await ws.close()
+                await self.close()
             else:
                 self.logger("error", "Something went wrong")
-                await ws.close()
+                await self.close()
             print_exc()
             self.last_exception = e
         finally:
