@@ -87,8 +87,6 @@ class RTConnection:
 
         self.events: dict[str, EventFunction] = {}
 
-        self.set_event(self._keep_alive)
-
     def set_loop(self, loop: Optional[AbstractEventLoop]) -> None:
         "イベントループを設定します。これは接続以前に実行されるべきです。"
         self.loop = loop or get_running_loop()
@@ -148,8 +146,7 @@ class RTConnection:
         `request`のレスポンスが帰ってきた際に呼び出されます。
 
         Raises: KeyError"""
-        if data.get("data", "") != "_keep_alive":
-            self.logger("info", "Received response: %s" % self._make_session_name(data))
+        self.logger("info", "Received response: %s" % self._make_session_name(data))
         self.queues[data["session"]].set(data)
 
     def response(
@@ -182,8 +179,7 @@ class RTConnection:
     def on_request(self, data: Data) -> None:
         """相手からリクエストがきた際に呼び出される関数です。
         `process_request`の呼び出しを`try`でラップしてエラーハンドリングをするコルーチン関数のコルーチンをイベントループにタスクとして追加します。"""
-        if data["event_name"] != "_keep_alive":
-            self.logger("info", "Received request: %s" % self._make_session_name(data))
+        self.logger("info", "Received request: %s" % self._make_session_name(data))
         if data["event_name"] in self.events:
             self.loop.create_task(
                 self._wrap_error_handling(self.events[data["event_name"]], data)
@@ -206,25 +202,8 @@ class RTConnection:
         if before_key is not None:
             return self.queues[before_key]
 
-    def _keep_alive(self, _):
-        return "_keep_alive"
-
-    @tasks.loop(seconds=5)
-    async def keep_alive(self):
-        try: await self.request("_keep_alive", None)
-        except RequestError: ...
-
-    def __del__(self):
-        if self.keep_alive.is_running():
-            self.keep_alive.stop()
-
     async def close(self, *args, **kwargs):
-        self.__del__()
         return await self.ws.close(*args, **kwargs)
-
-    async def delay_ka_start(self):
-        await sleep(5)
-        if not self.keep_alive.is_running(): self.keep_alive.start()
 
     async def communicate(
         self, ws: Union[WebSocketServerProtocol, WebSocketClientProtocol],
@@ -236,7 +215,6 @@ class RTConnection:
         assert self.loop is not None, "イベントループを設定してください。"
         self.ws, self.queues = ws, {}
         self.ready.set()
-        self.loop.create_task(self.delay_ka_start())
         self.logger("info", "Start RTConnection")
         # on_readyがあれば実行する。
         if "on_connect" in self.events:
@@ -258,9 +236,7 @@ class RTConnection:
                     sent = False
                     if queue := self.get_queue():
                         if not getattr(queue, "sent", False):
-                            if queue.subject[1].get("event_name", "") != "_keep_alive" \
-                                    and queue.subject[1].get("data", "") != "_keep_alive":
-                                self.logger("info", "Send data: %s" % self._make_session_name(queue.subject[1]))
+                            self.logger("info", "Send data: %s" % self._make_session_name(queue.subject[1]))
                             queue.sent = True
                             await ws.send(dumps(queue.subject[1]))
                             sent = True
