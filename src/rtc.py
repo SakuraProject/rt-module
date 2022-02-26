@@ -87,7 +87,6 @@ class RTConnection:
 
         self.events: dict[str, EventFunction] = {}
 
-        self.keep_alive.start()
         self.set_event(self._keep_alive)
 
     def set_loop(self, loop: Optional[AbstractEventLoop]) -> None:
