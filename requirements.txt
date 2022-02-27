@@ -1,2 +1,2 @@
 sanic
-nextcord
+websockets
