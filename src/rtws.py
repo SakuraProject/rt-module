@@ -63,6 +63,8 @@ class RTWebSocket:
         self.started = asyncio.Event()
         self.events: dict[str, EventFunction] = {}
 
+        self._successfully_disconnected = None
+
     def set_event(self, function: EventFunction, name: Optional[str] = None) -> None:
         "イベントを設定します。"
         awb = iscoroutinefunction(getattr(function, "__func__", function))
@@ -101,7 +103,7 @@ class RTWebSocket:
 
     def is_connected(self) -> bool:
         "接続をしているかどうかです。"
-        return self.ws.open
+        return not self.ws.closed
 
     def make_session(self) -> Session:
         "セッションコードを作成します。"
@@ -247,6 +249,7 @@ class RTWebSocket:
         assert self.ws is not None and self.is_connected(), "まだ接続していません。"
         self.log("info", "Closing...")
         await self.ws.close(*args, **kwargs)
+        self.clean()
 
     def clean(self):
         "残っているWaitingのお片付けをする。"
