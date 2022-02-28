@@ -33,6 +33,7 @@ class Queues:
 
 
 class Packet(TypedDict):
+    "通信時にどのようにデータを梱包するかの型です。"
     status: Literal["Ok", "Error"]
     type: Literal["request", "response"]
     data: Union[Sequence[Sequence[MainData], dict[str, MainData]], str]
@@ -49,6 +50,7 @@ EventFunction = Union[Callable[..., EventCoroutine], Callable[..., MainData]]
 
 
 class RTWebSocket:
+    "サーバーとクライアントと通信を簡単に行うためのものです。"
 
     ws: Optional[WebSocket] = None
     queues: Optional[Queues] = None
@@ -66,7 +68,7 @@ class RTWebSocket:
         self._successfully_disconnected = None
 
     def set_event(self, function: EventFunction, name: Optional[str] = None) -> None:
-        "イベントを設定します。"
+        "イベントを設定します。相手はこれで設定したイベントを呼び出します。そしてこれで設定した関数が返した値を相手に送り返します。"
         awb = iscoroutinefunction(getattr(function, "__func__", function))
         try: function.__awaitable__ = awb
         except: function.__func__.__awaitable__ = awb
@@ -163,7 +165,7 @@ class RTWebSocket:
                 await self.ws.send(dumps(data, ensure_ascii=False))
 
     async def request(self, event: str, *args, **kwargs) -> MainData:
-        "リクエストを行います。イベント名を属性から指定することもできます。"
+        "リクエストを行います。相手側であらかじめ登録されているイベントに設定されている関数が返した値が返ります。"
         await self.queues.sending.put(data := Packet(
             status="Ok", type="request", data=(args, kwargs),
             session=self.make_session(), event=event
